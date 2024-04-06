@@ -1,0 +1,6 @@
+assemblyai
+"assemblyai[extras]"
+langchain
+langchain_openai
+dotenv
+numpy

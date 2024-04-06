@@ -20,6 +20,7 @@ import configparser
 import json
 import threading
 import time
+from pynput.keyboard import Controller
 
 import pyaudio
 import websocket
@@ -41,12 +42,12 @@ FINALS = []
 LAST = None
 
 REGION_MAP = {
-    'us-east': 'gateway-wdc.watsonplatform.net',
-    'us-south': 'stream.watsonplatform.net',
-    'eu-gb': 'stream.watsonplatform.net',
-    'eu-de': 'stream-fra.watsonplatform.net',
-    'au-syd': 'gateway-syd.watsonplatform.net',
-    'jp-tok': 'gateway-syd.watsonplatform.net',
+    "us-east": "gateway-wdc.watsonplatform.net",
+    "us-south": "stream.watsonplatform.net",
+    "eu-gb": "stream.watsonplatform.net",
+    "eu-de": "stream-fra.watsonplatform.net",
+    "au-syd": "gateway-syd.watsonplatform.net",
+    "jp-tok": "gateway-syd.watsonplatform.net",
 }
 
 
@@ -66,12 +67,10 @@ def read_audio(ws, timeout):
     #
     # Where N is an int. You'll need to do a dump of your input
     # devices to figure out which one you want.
-    RATE = int(p.get_default_input_device_info()['defaultSampleRate'])
-    stream = p.open(format=FORMAT,
-                    channels=CHANNELS,
-                    rate=RATE,
-                    input=True,
-                    frames_per_buffer=CHUNK)
+    RATE = int(p.get_default_input_device_info()["defaultSampleRate"])
+    stream = p.open(
+        format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK
+    )
 
     print("* recording")
     rec = timeout or RECORD_SECONDS
@@ -92,7 +91,7 @@ def read_audio(ws, timeout):
     # In order to get a final response from STT we send a stop, this
     # will force a final=True return message.
     data = {"action": "stop"}
-    ws.send(json.dumps(data).encode('utf8'))
+    ws.send(json.dumps(data).encode("utf8"))
     # ... which we need to wait for before we shutdown the websocket
     time.sleep(1)
     ws.close()
@@ -120,7 +119,7 @@ def on_message(self, msg):
         else:
             LAST = data
         # This prints out the current fragment that we are working on
-        print(data['results'][0]['alternatives'][0]['transcript'])
+        print(data["results"][0]["alternatives"][0]["transcript"])
 
 
 def on_error(self, error):
@@ -128,13 +127,12 @@ def on_error(self, error):
     print(error)
 
 
-def on_close(ws,close_status_code, close_msg):
+def on_close(ws, close_status_code, close_msg):
     """Upon close, print the complete and final transcript."""
     global LAST
     if LAST:
         FINALS.append(LAST)
-    transcript = "".join([x['results'][0]['alternatives'][0]['transcript']
-                          for x in FINALS])
+    transcript = "".join([x["results"][0]["alternatives"][0]["transcript"] for x in FINALS])
     text_file = open("Output.txt", "w")
     text_file.write(transcript)
     text_file.close()
@@ -155,65 +153,59 @@ def on_open(ws):
         # closed by the server.
         "word_confidence": True,
         "timestamps": True,
-        "max_alternatives": 3
+        "max_alternatives": 3,
     }
 
     # Send the initial control message which sets expectations for the
     # binary stream that follows:
-    ws.send(json.dumps(data).encode('utf8'))
+    ws.send(json.dumps(data).encode("utf8"))
     # Spin off a dedicated thread where we are going to read and
     # stream out audio.
-    threading.Thread(target=read_audio,
-                     args=(ws, args.timeout)).start()
+    threading.Thread(target=read_audio, args=(ws, args.timeout)).start()
+
 
 def get_url():
-    return ("wss://api.us-south.speech-to-text.watson.cloud.ibm.com/instances/77871dbc-7d5b-40d0-ae7a-3cabbc193993/v1"
-            "/recognize/&model=en-US_BroadbandModel")
+    return (
+        "wss://api.us-south.speech-to-text.watson.cloud.ibm.com/instances/77871dbc-7d5b-40d0-ae7a-3cabbc193993/v1"
+        "/recognize/&model=en-US_BroadbandModel"
+    )
+
 
 def get_auth():
     config = configparser.RawConfigParser()
-    config.read('speech.cfg')
-    apikey = config.get('auth', 'apikey')
+    config.read("speech.cfg")
+    apikey = config.get("auth", "apikey")
     return ("apikey", apikey)
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(
-        description='Transcribe Watson text in real time')
-    parser.add_argument('-t', '--timeout', type=int, default=5)
+    parser = argparse.ArgumentParser(description="Transcribe Watson text in real time")
+    parser.add_argument("-t", "--timeout", type=int, default=30000)
     # parser.add_argument('-d', '--device')
     # parser.add_argument('-v', '--verbose', action='store_true')
     args = parser.parse_args()
     return args
 
 
-def main():
-    # Connect to websocket interfaces
-    headers = {}
-    userpass = ":".join(get_auth())
-    headers["Authorization"] = "Basic " + base64.b64encode(
-        userpass.encode()).decode()
-    url = get_url()
+class Transcriber:
+    def __init__(self) -> None:
+        # Connect to websocket interfaces
+        headers = {}
+        userpass = ":".join(get_auth())
+        headers["Authorization"] = "Basic " + base64.b64encode(userpass.encode()).decode()
+        url = get_url()
 
-    # If you really want to see everything going across the wire,
-    # uncomment this. However realize the trace is going to also do
-    # things like dump the binary sound packets in text in the
-    # console.
-    #
-    # websocket.enableTrace(True)
-    ws = websocket.WebSocketApp(url,
-                                header=headers,
-                                on_message=on_message,
-                                on_error=on_error,
-                                on_close=on_close)
-    ws.on_open = on_open
-    ws.args = parse_args()
-    # This gives control over the WebSocketApp. This is a blocking
-    # call, so it won't return until the ws.close() gets called (after
-    # 6 seconds in the dedicated thread).
-    ws.run_forever()
+        self.ws = websocket.WebSocketApp(
+            url, header=headers, on_message=on_message, on_error=on_error, on_close=on_close
+        )
 
+    def run(self):
+        self.ws.on_open = on_open
+        self.ws.args = parse_args()
+        keyboard.add_hotkey('t', self.ws.close)
+        self.ws.run_forever()
 
-if __name__ == "__main__":
-    main()
+    def close(self):
+        self.ws.close()
 
+Transcriber().run()
